@@ -2,6 +2,7 @@ import type { ProductEventMap, ProductEvent } from '@deepseek-ai/dsh-client-prod
 import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
 
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -208,12 +209,20 @@ function platformLoginUrl(authorizeUrl: string): string {
 }
 
 function createWindow(preload: string, show = false, primary = false): BrowserWindow {
+  // Linux window managers take the taskbar icon from _NET_WM_ICON; the packaged PNG is
+  // shipped as resources/icon.png, and an unpackaged launch falls back to the source bitmap.
+  const resourcesPath = process.resourcesPath
+  const linuxIconPath = process.platform === 'linux' && typeof resourcesPath === 'string'
+    ? [join(resourcesPath, 'icon.png'), join(app.getAppPath(), 'resources', 'icon-windows.png')]
+      .find(candidate => existsSync(candidate))
+    : undefined
   const window = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 520,
     minHeight: 600,
     show,
+    ...(linuxIconPath === undefined ? {} : { icon: nativeImage.createFromPath(linuxIconPath) }),
     ...(process.platform === 'win32' && primary ? {
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
@@ -1019,9 +1028,12 @@ async function main(): Promise<void> {
     tray?.relabel()
   }
   refreshApplicationMenu()
-  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
-  if (process.platform === 'win32') {
-    // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
+  const trayIconPath = development
+    ? join(app.getAppPath(), 'resources', process.platform === 'win32' ? 'tray-windows.ico' : 'tray.png')
+    : join(process.resourcesPath, process.platform === 'win32' ? 'tray.ico' : 'tray.png')
+  if (process.platform === 'win32' || process.platform === 'linux') {
+    // The tray is the way back to a hidden window. Linux needs a StatusNotifier-capable panel;
+    // when the icon cannot be created, the close handler quits instead of hiding.
     try {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
         open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
@@ -1109,6 +1121,9 @@ async function main(): Promise<void> {
     // Closing hides: the page and the Host keep running, and the next show resumes the same document.
     window.on('close', (event) => {
       if (quitting || shellInstallerOwnsQuit || sessionEnding) return
+      // A hidden window needs a way back. A Linux panel without a StatusNotifier host yields no
+      // tray icon, so close quits there instead of hiding the window forever.
+      if (process.platform === 'linux' && tray === undefined) return
       event.preventDefault()
       if (updateDialog.isOpen) { updateDialog.focus(); return }
       const hide = (): void => {

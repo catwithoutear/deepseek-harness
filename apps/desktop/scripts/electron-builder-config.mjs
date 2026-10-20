@@ -159,6 +159,8 @@ export function createElectronBuilderConfig(
       { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
       // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
+      // Linux panels read the tray bitmap from resources/tray.png.
+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray.png', import.meta.url)), to: 'tray.png' }] : []),
     ],
     mac: {
       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
@@ -254,7 +256,9 @@ export function createElectronBuilderConfig(
     linux: {
       // A local Linux build is unsigned: no update feed, no mandatory-update policy.
       executableName: 'deepseek-harness',
-      icon: fileURLToPath(new URL('../resources/icon.png', import.meta.url)),
+      // A directory of standard hicolor sizes; a single 1104 px PNG lands in a non-standard
+      // directory that panels do not search, which shows up as a generic icon.
+      icon: fileURLToPath(new URL('../resources/linux-icons', import.meta.url)),
       category: 'Development',
       // `deb` requires an explicit maintainer; the application package has no author email.
       maintainer: 'catwithoutear <catwithoutear@users.noreply.github.com>',
