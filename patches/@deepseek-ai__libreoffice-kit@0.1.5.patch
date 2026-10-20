@@ -1,0 +1,24 @@
+diff --git a/lib/index.js b/lib/index.js
+index aac18a0..fa6b70d 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -1481,7 +1481,18 @@ const ENGINE_PREFIX = "@deepseek-ai/libreoffice-kit";
+ * @returns true when at least one resolution directory holds the package.
+ */
+ function installedPackageExists(name) {
+-	return (require.resolve.paths(name) ?? []).some((directory) => lstatSync(join(directory, name), { throwIfNoEntry: false }) !== void 0);
++	// Electron's asar-aware fs reports a nonexistent entry inside the archive as present, which
++	// would turn the intended Linux WASM fallback into "installed package is incomplete".
++	const separator = name.lastIndexOf("/");
++	const parent = separator === -1 ? "" : name.slice(0, separator);
++	const leaf = separator === -1 ? name : name.slice(separator + 1);
++	return (require.resolve.paths(name) ?? []).some((directory) => {
++		try {
++			return readdirSync(join(directory, parent)).includes(leaf);
++		} catch {
++			return false;
++		}
++	});
+ }
+ /**
+ * Return the optional package target for the current process ABI.
