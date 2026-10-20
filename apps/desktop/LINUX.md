@@ -63,24 +63,43 @@ pnpm --dir apps/desktop run package:linux:x64:unsigned
 产物位置：
 
 - 解包目录：`apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/linux-unpacked/`
-- AppImage：`apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/deepseek-harness-<版本>-linux-x64.AppImage`
+- AppImage：`.../deepseek-harness-<版本>-linux-x86_64-unsigned.AppImage`
+- deb：`.../deepseek-harness-<版本>-linux-amd64-unsigned.deb`
 
 ## 运行
 
+AppImage：
+
 ```sh
-chmod +x deepseek-harness-*.AppImage
-./deepseek-harness-*.AppImage
+chmod +x deepseek-harness-*-linux-x86_64-unsigned.AppImage
+./deepseek-harness-*-linux-x86_64-unsigned.AppImage
 ```
+
+AppImage 在部分发行版上需要 FUSE；没有 FUSE 时用 `--appimage-extract-and-run` 参数运行。
+如果安装了 AppImageLauncher，双击可能被它接管（提示集成/移动文件）；直接执行上面的命令，
+或改用 deb。
+
+deb（Debian / Ubuntu / Mint）：
+
+```sh
+sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
+# 或：sudo dpkg -i ./deepseek-harness-*-linux-amd64-unsigned.deb && sudo apt -f install
+```
+
+安装后应用位于 `/opt/DeepSeek Harness/`，菜单项是 “DeepSeek Harness”，
+卸载用 `sudo apt remove deepseek-harness`。deb 会注册 `dsh://` 协议处理。
 
 首次启动会在 `$DSH_HOME`（默认 `~/.dsh`）下准备 `profiles/desktop`，与已安装的 CLI `dsh`
 共享会话、凭据和工作区，但可执行包与插件锁文件相互独立。
 
-AppImage 在部分发行版上需要 FUSE；没有 FUSE 时用 `--appimage-extract-and-run` 参数运行。
+启动时应用会读取一次登录 shell 的环境（`zsh -ilc`、`bash -ilc`）。如果 shell 启动脚本很慢，
+每个候选有 10 秒超时，最坏情况下首屏会晚几十秒；日志里会出现
+`desktop login shell: ... failed (timeout)`，随后回退到下一个 shell。
 
 ## 已知限制
 
 - 未签名：没有 Apple/Windows 那套签名链，也不产出更新 feed；应用内自动更新不可用，
-  升级方式就是替换 AppImage。
+  升级方式就是替换 AppImage 或 `apt install` 新的 deb。
 - 没有强制更新策略：本地构建刻意跳过 `DSH_DESKTOP_MANDATORY_UPDATE_*`，
   不会去拉取上游的强制更新配置。
 - 只验证 x64；`linux-arm64` 没有加入构建目标。
@@ -96,7 +115,7 @@ AppImage 在部分发行版上需要 FUSE；没有 FUSE 时用 `--appimage-extra
 | `apps/desktop/scripts/desktop-build-paths.mjs`、`.d.mts` | 目标集合加入 `linux-x64`；平台映射返回 `linux`；新增 `desktopElectronExecutable()`，统一 Windows/macOS/Linux 的 Electron 可执行文件路径 |
 | `apps/desktop/scripts/package-target.ts` | 增加 `linux-x64` 目标与 `--linux` builder 选择器；Linux 只允许 Linux x64 宿主；unsigned 构建使用本机环境；Linux 没有更新目标，跳过 release record |
 | `apps/desktop/scripts/desktop-package-environment.mjs`、`.d.mts` | 新增 `localLinuxPackageEnvironment()`；Linux 支持 `.env.linux`；unsigned 的 Linux/macOS 本地构建跳过强制更新策略 |
-| `apps/desktop/scripts/electron-builder-config.mjs` | Linux unsigned 构建不解析更新策略；`linux.target` 保留 AppImage，固定 `executableName` 与图标 |
+| `apps/desktop/scripts/electron-builder-config.mjs` | Linux unsigned 构建不解析更新策略；固定 `executableName`、图标与 deb maintainer；产出 AppImage + deb |
 | `apps/desktop/scripts/prepare-runtime.ts`、`prepare-dsh.ts` | 使用 `desktopElectronExecutable()`，不再假设非 Windows 一定是 `Electron.app/...` |
 | `apps/desktop/scripts/prepare-cli.ts` | 非 Windows 的 `dsh` 启动脚本统一加可执行位 |
 | `apps/desktop/scripts/smoke-packaged-runtime.ts` | 增加 `linux-unpacked` 资源/可执行文件路径 |
@@ -104,6 +123,6 @@ AppImage 在部分发行版上需要 FUSE；没有 FUSE 时用 `--appimage-extra
 | `apps/desktop/scripts/desktop-build-version-discovery.ts` | `--build-version auto` 的远端映射支持 Linux（本地构建不触发） |
 | `apps/desktop/src/main.ts`、`platform-view.ts` | Linux 的 Platform 内嵌页上报 `null`，不再伪装成 `darwin` |
 | `apps/desktop/scripts/runtime-patch-policy.ts`、`patches/@deepseek-ai__libreoffice-kit@0.1.5.patch` | 只给 Desktop 运行时打补丁：asar 内的“包是否存在”探测会误报，导致 Linux 无法回退到 WASM Office 引擎 |
-| `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir` |
-| `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage |
+| `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`；补上 deb 需要的 `homepage`、Linux 窗口关联用的 `desktopName` |
+| `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage 和 deb |
 | `.gitignore` | 忽略 `apps/desktop/.env.linux` |
