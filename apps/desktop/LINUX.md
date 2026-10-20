@@ -79,6 +79,16 @@ AppImage 在部分发行版上需要 FUSE；没有 FUSE 时用 `--appimage-extra
 如果安装了 AppImageLauncher，双击可能被它接管（提示集成/移动文件）；直接执行上面的命令，
 或改用 deb。
 
+窗口行为：
+
+- 关闭窗口会隐藏到系统托盘（面板需要支持 StatusNotifier / appindicator，Cinnamon、KDE、
+  装了 AppIndicator 扩展的 GNOME 都可以）。
+- 托盘图标提供“打开 DeepSeek Harness / 退出 DeepSeek Harness”，单击图标重新显示窗口。
+- 如果面板没有 StatusNotifier 主机，托盘图标创建失败，此时关闭窗口会直接退出应用，
+  不会留下一个找不到入口的后台进程。
+- 托盘位图是 `resources/tray.png`，图标集是 `resources/linux-icons/`；改了源图后运行
+  `pnpm --dir apps/desktop run render:linux-icons` 重新生成。
+
 deb（Debian / Ubuntu / Mint）：
 
 ```sh
@@ -104,8 +114,8 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
   不会去拉取上游的强制更新配置。
 - 只验证 x64；`linux-arm64` 没有加入构建目标。
 - 账号/Platform 内嵌页在 Linux 上按 `null` 平台上报（上游的 Platform 头只区分 macOS/Windows）。
-- 菜单、托盘、快捷键、zenity/kdialog 目录选择等 Linux 分支上游已有代码，但没有经过发布级
-  QA；遇到问题请优先在 fork 里修。
+- 菜单、快捷键、zenity/kdialog 目录选择等 Linux 分支上游已有代码，但没有经过发布级 QA；
+  遇到问题请优先在 fork 里修。托盘是本 fork 新加的，只验证了 Cinnamon 系面板。
 - 版本号与上游相同（例如 `0.2.1-rc.2`），靠产物名和清单里的 `dshBuildCommit` 区分。
 
 ## 相对上游的改动
@@ -116,14 +126,15 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
 | `apps/desktop/scripts/package-target.ts` | 增加 `linux-x64` 目标与 `--linux` builder 选择器；Linux 只允许 Linux x64 宿主；unsigned 构建使用本机环境；Linux 没有更新目标，跳过 release record |
 | `apps/desktop/scripts/upload-target.ts`、`desktop-edgeone.ts` | 上传与固定安装器清理路径收窄到 `DesktopAutoUpdateTarget`：fork 把 `DesktopPackageTargetName` 扩到 `linux-x64` 后，COS 上传、release 记录和 EdgeOne purge 仍只覆盖 macOS/Windows |
 | `apps/desktop/scripts/desktop-package-environment.mjs`、`.d.mts` | 新增 `localLinuxPackageEnvironment()`；Linux 支持 `.env.linux`；unsigned 的 Linux/macOS 本地构建跳过强制更新策略 |
-| `apps/desktop/scripts/electron-builder-config.mjs` | Linux unsigned 构建不解析更新策略；固定 `executableName`、图标与 deb maintainer；产出 AppImage + deb |
+| `apps/desktop/scripts/electron-builder-config.mjs` | Linux unsigned 构建不解析更新策略；固定 `executableName`、标准 hicolor 图标目录与 deb maintainer；产出 AppImage + deb；为 Linux 附带 `tray.png` |
 | `apps/desktop/scripts/prepare-runtime.ts`、`prepare-dsh.ts` | 使用 `desktopElectronExecutable()`，不再假设非 Windows 一定是 `Electron.app/...` |
 | `apps/desktop/scripts/prepare-cli.ts` | 非 Windows 的 `dsh` 启动脚本统一加可执行位 |
+| `apps/desktop/resources/linux-icons/`、`resources/tray.png`、`scripts/render-linux-icons.ts` | 标准尺寸 hicolor 图标与托盘位图，以及可重复生成它们的脚本 |
 | `apps/desktop/scripts/smoke-packaged-runtime.ts` | 增加 `linux-unpacked` 资源/可执行文件路径 |
 | `apps/desktop/scripts/desktop-toolchain-preflight.ts` | 平台参数接受 `linux` |
 | `apps/desktop/scripts/desktop-build-version-discovery.ts` | `--build-version auto` 的远端映射支持 Linux（本地构建不触发） |
-| `apps/desktop/src/main.ts`、`platform-view.ts` | Linux 的 Platform 内嵌页上报 `null`，不再伪装成 `darwin` |
+| `apps/desktop/src/main.ts`、`platform-view.ts` | Linux 的 Platform 内嵌页上报 `null`，不再伪装成 `darwin`；设置 Linux 窗口图标；Linux 托盘与“无托盘时关闭即退出” |
 | `apps/desktop/scripts/runtime-patch-policy.ts`、`patches/@deepseek-ai__libreoffice-kit@0.1.5.patch` | 只给 Desktop 运行时打补丁：asar 内的“包是否存在”探测会误报，导致 Linux 无法回退到 WASM Office 引擎 |
-| `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`；补上 deb 需要的 `homepage`、Linux 窗口关联用的 `desktopName` |
+| `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`、`render:linux-icons`；补上 deb 需要的 `homepage`，以及无空格的 `desktopName`（WM_CLASS 与 .desktop 对齐） |
 | `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage 和 deb |
 | `.gitignore` | 忽略 `apps/desktop/.env.linux` |
