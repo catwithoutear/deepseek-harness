@@ -66,7 +66,7 @@ export function createElectronBuilderConfig(
   if (skipNotarization && (unsigned || resolvedPlatform !== 'darwin')) throw new Error('Skipping notarization requires a signed macOS build')
   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
   const packagesWindows = resolvedPlatform === 'win32'
-  const policy = packagesMacOS && unsigned ? undefined : resolveDesktopPolicyEnvironment(env)
+  const policy = unsigned && (packagesMacOS || resolvedPlatform === 'linux') ? undefined : resolveDesktopPolicyEnvironment(env)
   if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
   const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
   if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
@@ -253,7 +253,12 @@ export function createElectronBuilderConfig(
       target: ['nsis'],
     },
     linux: {
+      // A local Linux build is an unsigned AppImage: no update feed, no mandatory-update policy.
+      executableName: 'deepseek-harness',
+      icon: fileURLToPath(new URL('../resources/icon.png', import.meta.url)),
       category: 'Development',
+      // Associate running windows with the generated .desktop entry.
+      syncDesktopName: true,
       target: ['AppImage'],
     },
     nsis: {
