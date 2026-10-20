@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { load } from 'js-yaml'
 import { createDesktopUploadPlan } from '../scripts/desktop-upload-plan.ts'
 import { desktopUpdateMetadataFilename } from '@deepseek-ai/dsh-desktop-publisher/desktop-auto-update-environment.mjs'
-import type { DesktopPackageTargetName } from '../scripts/package-target.ts'
+import type { DesktopAutoUpdateTarget } from '@deepseek-ai/dsh-desktop-publisher/desktop-auto-update-environment.mjs'
 import { createDesktopCos } from '@deepseek-ai/dsh-desktop-publisher/desktop-cos.ts'
 import { uploadDesktopRelease } from '../scripts/desktop-upload-run.ts'
 import { startCosLoopback } from '../../desktop-publisher/tests/cos-loopback.ts'
@@ -35,7 +35,7 @@ function digest(contents: string): string {
 }
 
 async function fixture(
-  target: DesktopPackageTargetName,
+  target: DesktopAutoUpdateTarget,
   version = '1.2.3',
   environment: 'test' | 'production' = 'test',
   channel: 'nightly' | 'stable' = 'nightly',
