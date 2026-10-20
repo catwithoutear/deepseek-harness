@@ -1,0 +1,56 @@
+name: Package Desktop · Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_version:
+        description: 'Build version (blank keeps the product version)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-linux-package
+  cancel-in-progress: false
+
+jobs:
+  package:
+    # Unsigned, update-free AppImage for local installs; this fork does not publish a release.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: 11.28.5
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Package Linux AppImage
+        run: |
+          set -o pipefail
+          args=(linux-x64 --unsigned)
+          if [ -n "${{ inputs.build_version }}" ]; then
+            args+=(--build-version "${{ inputs.build_version }}")
+          fi
+          pnpm --dir apps/desktop exec tsx scripts/package-target.ts "${args[@]}"
+      - name: Retain AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-unsigned-appimage
+          path: apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/*.AppImage
+          if-no-files-found: error
+      - name: Retain packaging diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-package-logs
+          path: apps/desktop/.desktop-build/packaging-runs/**/*.log
+          if-no-files-found: ignore
