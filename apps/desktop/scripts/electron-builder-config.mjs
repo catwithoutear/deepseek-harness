@@ -253,13 +253,16 @@ export function createElectronBuilderConfig(
       target: ['nsis'],
     },
     linux: {
-      // A local Linux build is an unsigned AppImage: no update feed, no mandatory-update policy.
+      // A local Linux build is unsigned: no update feed, no mandatory-update policy.
       executableName: 'deepseek-harness',
       icon: fileURLToPath(new URL('../resources/icon.png', import.meta.url)),
       category: 'Development',
+      // `deb` requires an explicit maintainer; the application package has no author email.
+      maintainer: 'catwithoutear <catwithoutear@users.noreply.github.com>',
       // Associate running windows with the generated .desktop entry.
       syncDesktopName: true,
-      target: ['AppImage'],
+      // AppImage needs no installation; deb integrates into the system menu on Debian/Ubuntu.
+      target: ['AppImage', 'deb'],
     },
     nsis: {
       uninstallDisplayName: '${productName}',
