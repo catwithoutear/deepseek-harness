@@ -129,8 +129,8 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
 DSH_DESKTOP_TARGET_PLATFORM=linux DSH_DESKTOP_TARGET_ARCH=x64 \
 DSH_DESKTOP_UNSIGNED=1 DSH_DESKTOP_APP_ID=com.deepseek.harness.linux \
 DSH_DESKTOP_LINUX_FEED_URL=https://github.com/catwithoutear/deepseek-harness/releases/download/linux-nightly \
-DSH_DESKTOP_BUILD_VERSION=0.2.1-rc.2.$(date -u +%Y%m%d).1 \
-pnpm --dir apps/desktop exec tsx scripts/package-target.ts linux-x64 --unsigned
+pnpm --dir apps/desktop exec tsx scripts/package-target.ts linux-x64 --unsigned \
+  --build-version "0.2.1-rc.2.$(date -u +%Y%m%d).1"
 ```
 
 ## 包签名
