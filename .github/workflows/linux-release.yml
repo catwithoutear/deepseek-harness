@@ -1,0 +1,154 @@
+name: Linux nightly
+
+# Builds and publishes the Linux deb and AppImage whenever upstream moves, plus on demand.
+# The rolling release tag `linux-nightly` hosts the generic update feed the desktop app reads.
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even when upstream has not changed'
+        type: boolean
+        default: false
+  schedule:
+    # 02:00 Asia/Shanghai
+    - cron: '0 18 * * *'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: linux-nightly
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: linux-nightly
+  FEED_URL: https://github.com/catwithoutear/deepseek-harness/releases/download/linux-nightly
+  UPSTREAM_REPOSITORY: deepseek-ai/deepseek-harness
+  LINUX_BRANCH: linux
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      needed: ${{ steps.plan.outputs.needed }}
+      build_version: ${{ steps.plan.outputs.build_version }}
+      product_version: ${{ steps.plan.outputs.product_version }}
+      upstream_commit: ${{ steps.plan.outputs.upstream_commit }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ env.LINUX_BRANCH }}
+          fetch-depth: 0
+      - name: Rebase the Linux patches onto upstream
+        run: |
+          set -euo pipefail
+          git config user.name 'linux-nightly'
+          git config user.email 'catwithoutear@users.noreply.github.com'
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags upstream master
+          if ! git merge-base --is-ancestor upstream/master HEAD; then
+            git rebase upstream/master
+          fi
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/${LINUX_BRANCH})" ]; then
+            git push --force-with-lease origin "HEAD:${LINUX_BRANCH}"
+          fi
+      - name: Decide whether upstream changed
+        id: plan
+        env:
+          FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          upstream_commit=$(git rev-parse upstream/master)
+          product_version=$(git show upstream/master:package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).version))")
+          previous=''
+          if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx 'upstream-version.txt'; then
+            gh release download "$RELEASE_TAG" --pattern upstream-version.txt --dir "$RUNNER_TEMP/previous" --clobber
+            previous=$(cat "$RUNNER_TEMP/previous/upstream-version.txt")
+          fi
+          date_segment=$(date -u +%Y%m%d)
+          build_version="${product_version}.${date_segment}.${RUN_NUMBER}"
+          if [ "$previous" = "$upstream_commit" ] && [ "${FORCE:-false}" != 'true' ]; then
+            needed=false
+          else
+            needed=true
+          fi
+          echo "needed=$needed" >> "$GITHUB_OUTPUT"
+          echo "build_version=$build_version" >> "$GITHUB_OUTPUT"
+          echo "product_version=$product_version" >> "$GITHUB_OUTPUT"
+          echo "upstream_commit=$upstream_commit" >> "$GITHUB_OUTPUT"
+          echo "Upstream ${upstream_commit:0:12}, product ${product_version}, need build: ${needed}"
+
+  package:
+    needs: prepare
+    if: needs.prepare.outputs.needed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ env.LINUX_BRANCH }}
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: 11.28.5
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Package AppImage and deb
+        env:
+          DSH_DESKTOP_TARGET_PLATFORM: linux
+          DSH_DESKTOP_TARGET_ARCH: x64
+          DSH_DESKTOP_UNSIGNED: '1'
+          DSH_DESKTOP_APP_ID: com.deepseek.harness.linux
+          DSH_DESKTOP_LINUX_FEED_URL: ${{ env.FEED_URL }}
+          DSH_DESKTOP_BUILD_VERSION: ${{ needs.prepare.outputs.build_version }}
+        run: pnpm --dir apps/desktop exec tsx scripts/package-target.ts linux-x64 --unsigned
+      - name: Sign artifacts
+        env:
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/gnupg"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          printf '%s' "$LINUX_GPG_PRIVATE_KEY" | gpg --batch --import
+          pnpm --dir apps/desktop exec tsx scripts/sign-linux-artifacts.mjs
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_VERSION: ${{ needs.prepare.outputs.build_version }}
+          PRODUCT_VERSION: ${{ needs.prepare.outputs.product_version }}
+          UPSTREAM_COMMIT: ${{ needs.prepare.outputs.upstream_commit }}
+        run: |
+          set -euo pipefail
+          artifacts=apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts
+          fingerprint=$(GNUPGHOME="$RUNNER_TEMP/gnupg" gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')
+          notes=$(mktemp)
+          cat > "$notes" <<EOF
+          Rolling Linux build of DeepSeek Harness.
+
+          - build version: \`$BUILD_VERSION\`
+          - upstream product version: \`$PRODUCT_VERSION\`
+          - upstream commit: \`$UPSTREAM_COMMIT\`
+          - signing key: \`$fingerprint\`
+
+          The desktop app checks this release's \`nightly-linux.yml\` feed.
+          Verify downloads with \`gpg --verify <file>.asc <file>\` after importing
+          \`linux-signing-key.asc\`.
+          EOF
+          cp apps/desktop/linux-signing-key.asc "$artifacts/"
+          printf '%s\n' "$UPSTREAM_COMMIT" > "$artifacts/upstream-version.txt"
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$RELEASE_TAG" --prerelease --title "Linux nightly · $BUILD_VERSION" --notes-file "$notes"
+          # Binaries and their signatures first, so the feed never points at missing files.
+          gh release upload "$RELEASE_TAG" \
+            "$artifacts"/*.AppImage "$artifacts"/*.deb \
+            "$artifacts"/*.AppImage.asc "$artifacts"/*.deb.asc \
+            "$artifacts/linux-signing-key.asc"
+          gh release upload "$RELEASE_TAG" \
+            "$artifacts/nightly-linux.yml" "$artifacts/nightly-linux.yml.asc" \
+            "$artifacts/SHA256SUMS" "$artifacts/SHA256SUMS.asc" \
+            "$artifacts/upstream-version.txt"
