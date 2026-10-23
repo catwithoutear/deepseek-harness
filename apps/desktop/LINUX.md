@@ -122,6 +122,8 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
   `0.2.1-rc.2.20261023.42`，semver 上严格递增；`latest` 通道不接受 prerelease，所以固定用
   `nightly`
 - 本地构建不设置 `DSH_DESKTOP_LINUX_FEED_URL` 时不生成 `app-update.yml`，更新功能保持关闭
+- 首次必须手动安装一个带 feed 的发布版（本仓库 release 里的 deb/AppImage）；更早的手工构建
+  没有 `app-update.yml`，其“检查更新”不会工作。之后的应用内更新才会生效
 
 发布构建命令（CI 里就是这么跑的）：
 
