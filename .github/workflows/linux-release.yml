@@ -104,8 +104,9 @@ jobs:
           DSH_DESKTOP_UNSIGNED: '1'
           DSH_DESKTOP_APP_ID: com.deepseek.harness.linux
           DSH_DESKTOP_LINUX_FEED_URL: ${{ env.FEED_URL }}
-          DSH_DESKTOP_BUILD_VERSION: ${{ needs.prepare.outputs.build_version }}
-        run: pnpm --dir apps/desktop exec tsx scripts/package-target.ts linux-x64 --unsigned
+        run: |
+          pnpm --dir apps/desktop exec tsx scripts/package-target.ts linux-x64 --unsigned \
+            --build-version "${{ needs.prepare.outputs.build_version }}"
       - name: Sign artifacts
         env:
           LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
