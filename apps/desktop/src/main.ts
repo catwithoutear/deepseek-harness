@@ -270,6 +270,9 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     minWidth: 520,
     minHeight: 600,
     show,
+    // Linux would otherwise stack a native menu strip above the custom app surface; keep it
+    // reachable with Alt while the default look stays uncluttered.
+    autoHideMenuBar: process.platform === 'linux',
     ...(linuxIconPath === undefined ? {} : { icon: nativeImage.createFromPath(linuxIconPath) }),
     ...(process.platform === 'win32' && primary ? {
       titleBarStyle: 'hidden' as const,
@@ -1049,9 +1052,28 @@ async function main(): Promise<void> {
   // its standard menus and application hide commands declared explicitly.
   // Keep app.name stable: Electron derives its default userData directory from it.
   const darwin = process.platform === 'darwin'
+  // Electron's `editMenu` role ships English labels on Linux; Linux apps conventionally localize
+  // the menu, and the strip now appears only on demand (Alt).
+  const linuxEditMenu = (): MenuItemConstructorOptions => {
+    const { messages } = currentDesktopLocale()
+    return {
+      label: messages.edit,
+      submenu: [
+        { role: 'undo', label: messages.undo },
+        { role: 'redo', label: messages.redo },
+        { type: 'separator' },
+        { role: 'cut', label: messages.cut },
+        { role: 'copy', label: messages.copy },
+        { role: 'paste', label: messages.paste },
+        { role: 'delete', label: messages.delete },
+        { type: 'separator' },
+        { role: 'selectAll', label: messages.selectAll },
+      ],
+    }
+  }
   const platformMenus = (): MenuItemConstructorOptions[] => darwin
     ? [shortcuts.fileMenu(currentDesktopLocale().messages), { role: 'editMenu' }, { role: 'windowMenu' }]
-    : [{ role: 'editMenu' }]
+    : process.platform === 'linux' ? [linuxEditMenu()] : [{ role: 'editMenu' }]
   const hideCommands: MenuItemConstructorOptions[] = darwin
     ? [{ role: 'hide', label: currentDesktopLocale().messages.hideApplication },
       { role: 'hideOthers', label: currentDesktopLocale().messages.hideOtherApplications },
@@ -1080,7 +1102,7 @@ async function main(): Promise<void> {
     { type: 'separator' },
     ...hideCommands,
     { role: 'quit', ...(darwin ? { label: currentDesktopLocale().messages.quitApplication }
-      : process.platform === 'win32' ? { label: currentDesktopLocale().messages.exitApplication } : {}) },
+      : { label: currentDesktopLocale().messages.exitApplication }) },
   ]
   const devToolsItems: MenuItemConstructorOptions[] = [
     { role: 'toggleDevTools', visible: false },
