@@ -16,8 +16,9 @@ git fetch upstream master
 git rebase upstream/master          # 冲突通常只会出现在下面的补丁文件里
 ```
 
-建议把 Linux 支持保持为**一个独立提交**（`feat(desktop): package an unsigned Linux AppImage`），
-这样每次 rebase 只需要处理这一处差异；如果上游最终加入 Linux 目标，直接丢弃该提交即可。
+Linux 支持集中在默认分支 `linux`（3 个独立提交），CI 每天自动把这三个提交 rebase 到
+`upstream/master` 并构建发布；本地也可按上面的命令手动同步。如果上游最终加入 Linux 目标，
+直接丢弃这三个提交即可，`master` 保持为上游镜像。
 
 同步后至少重跑一次本机构建（见下），确认上游的结构性改动没有让补丁失效。
 
@@ -106,12 +107,77 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
 每个候选有 10 秒超时，最坏情况下首屏会晚几十秒；日志里会出现
 `desktop login shell: ... failed (timeout)`，随后回退到下一个 shell。
 
+## 自动更新（nightly 通道）
+
+发布构建会把更新源写进 `resources/app-update.yml`（generic provider，channel `nightly`），
+应用里“检查更新…”走的就是这条 feed：
+
+- 发布位置：GitHub Release 固定 tag `linux-nightly`（滚动覆盖），feed 文件名 `nightly-linux.yml`
+- feed 同时列出 `.AppImage` 和 `.deb`，各自的 updater 读取自己那一项
+- deb 安装：electron-builder 写入 `resources/package-type=deb`，electron-updater 选 `DebUpdater`，
+  下载后通过 `pkexec`/`sudo` 执行 `dpkg -i` 并重启
+- AppImage 安装：`AppImageUpdater` 依赖 `APPIMAGE` 环境变量原位置换文件；通过 AppImageLauncher
+  启动时该变量通常也会被设置
+- 版本号：`<上游 productVersion>.<UTC 日期>.<run number>`，例如
+  `0.2.1-rc.2.20261023.42`，semver 上严格递增；`latest` 通道不接受 prerelease，所以固定用
+  `nightly`
+- 本地构建不设置 `DSH_DESKTOP_LINUX_FEED_URL` 时不生成 `app-update.yml`，更新功能保持关闭
+
+发布构建命令（CI 里就是这么跑的）：
+
+```sh
+DSH_DESKTOP_TARGET_PLATFORM=linux DSH_DESKTOP_TARGET_ARCH=x64 \
+DSH_DESKTOP_UNSIGNED=1 DSH_DESKTOP_APP_ID=com.deepseek.harness.linux \
+DSH_DESKTOP_LINUX_FEED_URL=https://github.com/catwithoutear/deepseek-harness/releases/download/linux-nightly \
+DSH_DESKTOP_BUILD_VERSION=0.2.1-rc.2.$(date -u +%Y%m%d).1 \
+pnpm --dir apps/desktop exec tsx scripts/package-target.ts linux-x64 --unsigned
+```
+
+## 包签名
+
+- 签名密钥：`DeepSeek Harness Linux Builds (catwithoutear fork)`，
+  指纹 `F1160134168931A19A907B397BD571A1F9DACC1B`，公钥在
+  `apps/desktop/linux-signing-key.asc`（也会作为 release 资产上传）
+- 私钥只存在于 GitHub Actions secret `LINUX_GPG_PRIVATE_KEY`；密钥 ID 放在仓库 variable
+  `LINUX_GPG_KEY_ID`
+- 每个 `.AppImage`、`.deb`、`nightly-linux.yml`、`SHA256SUMS` 都有 detached `.asc` 签名
+- 手动签名：`pnpm --dir apps/desktop exec tsx scripts/sign-linux-artifacts.mjs`
+- 验证：
+
+```sh
+gpg --import linux-signing-key.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS
+gpg --verify deepseek-harness-*-linux-x86_64-unsigned.AppImage.asc deepseek-harness-*-linux-x86_64-unsigned.AppImage
+sha256sum -c SHA256SUMS
+```
+
+限制：electron-updater 自身只校验 feed 里的 sha512，不校验 GPG 签名；签名用于人工/脚本验证，
+以及发布链溯源的完整性证明，而不是应用内强制的安装门槛。
+
+## 发布流程（GitHub Actions）
+
+`.github/workflows/linux-release.yml`：
+
+1. **每天 02:00（Asia/Shanghai）** 或手动 dispatch（`force=true` 可强制重发）
+2. checkout `linux` 分支，fetch `upstream/master`；有新提交就把三个 Linux 提交 rebase 上去并
+   force-push 回 `linux`
+3. 对比滚动 release 里的 `upstream-version.txt`：上游 commit 没变且未 force 时直接跳过
+4. 在 `ubuntu-24.04` 上构建 AppImage + deb，注入 feed 与 build version
+5. 导入 GPG 私钥，签名全部产物
+6. 删除旧的 `linux-nightly` release 并重建，先传二进制与签名，再传 feed/校验和/版本标记
+
+rebase 冲突、构建失败、签名失败都会让 workflow 失败且**不发布**；此时需要人工在本地解决冲突后
+重新跑。
+
 ## 已知限制
 
-- 未签名：没有 Apple/Windows 那套签名链，也不产出更新 feed；应用内自动更新不可用，
-  升级方式就是替换 AppImage 或 `apt install` 新的 deb。
+- 未做 Apple/Windows 那类平台代码签名（产物名仍带 `-unsigned`），但发布产物有 GPG 签名；
+  deb 的 GPG 签名是 detached 文件，不写进包内，`apt` 不会自动校验
 - 没有强制更新策略：本地构建刻意跳过 `DSH_DESKTOP_MANDATORY_UPDATE_*`，
-  不会去拉取上游的强制更新配置。
+  不会去拉取上游的强制更新配置
+- 应用内更新不校验 GPG（只校验 sha512）；AppImage 更新要求以 AppImage 方式启动；
+  deb 更新需要 `pkexec`/`sudo` 授权对话框
+- 更新是“滚动 nightly”：旧版本资产会被覆盖，不做多版本并存
 - 只验证 x64；`linux-arm64` 没有加入构建目标。
 - 账号/Platform 内嵌页在 Linux 上按 `null` 平台上报（上游的 Platform 头只区分 macOS/Windows）。
 - 菜单、快捷键、zenity/kdialog 目录选择等 Linux 分支上游已有代码，但没有经过发布级 QA；
@@ -126,7 +192,7 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
 | `apps/desktop/scripts/package-target.ts` | 增加 `linux-x64` 目标与 `--linux` builder 选择器；Linux 只允许 Linux x64 宿主；unsigned 构建使用本机环境；Linux 没有更新目标，跳过 release record |
 | `apps/desktop/scripts/upload-target.ts`、`desktop-edgeone.ts` | 上传与固定安装器清理路径收窄到 `DesktopAutoUpdateTarget`：fork 把 `DesktopPackageTargetName` 扩到 `linux-x64` 后，COS 上传、release 记录和 EdgeOne purge 仍只覆盖 macOS/Windows |
 | `apps/desktop/scripts/desktop-package-environment.mjs`、`.d.mts` | 新增 `localLinuxPackageEnvironment()`；Linux 支持 `.env.linux`；unsigned 的 Linux/macOS 本地构建跳过强制更新策略 |
-| `apps/desktop/scripts/electron-builder-config.mjs` | Linux unsigned 构建不解析更新策略；固定 `executableName`、标准 hicolor 图标目录与 deb maintainer；产出 AppImage + deb；为 Linux 附带 `tray.png` |
+| `apps/desktop/scripts/electron-builder-config.mjs` | Linux unsigned 构建不解析更新策略；固定 `executableName`、标准 hicolor 图标目录与 deb maintainer；产出 AppImage + deb；为 Linux 附带 `tray.png`；设置 `DSH_DESKTOP_LINUX_FEED_URL` 时生成 generic 更新源与 `nightly-linux.yml` |
 | `apps/desktop/scripts/prepare-runtime.ts`、`prepare-dsh.ts` | 使用 `desktopElectronExecutable()`，不再假设非 Windows 一定是 `Electron.app/...` |
 | `apps/desktop/scripts/prepare-cli.ts` | 非 Windows 的 `dsh` 启动脚本统一加可执行位 |
 | `apps/desktop/resources/linux-icons/`、`resources/tray.png`、`scripts/render-linux-icons.ts` | 标准尺寸 hicolor 图标与托盘位图，以及可重复生成它们的脚本 |
@@ -136,5 +202,8 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
 | `apps/desktop/src/main.ts`、`platform-view.ts` | Linux 的 Platform 内嵌页上报 `null`，不再伪装成 `darwin`；设置 Linux 窗口图标；Linux 托盘与“无托盘时关闭即退出” |
 | `apps/desktop/scripts/runtime-patch-policy.ts`、`patches/@deepseek-ai__libreoffice-kit@0.1.5.patch` | 只给 Desktop 运行时打补丁：asar 内的“包是否存在”探测会误报，导致 Linux 无法回退到 WASM Office 引擎 |
 | `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`、`render:linux-icons`；补上 deb 需要的 `homepage`，以及无空格的 `desktopName`（WM_CLASS 与 .desktop 对齐） |
-| `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage 和 deb |
+| `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage 和 deb（不发布） |
+| `.github/workflows/linux-release.yml` | 每天追踪上游 → rebase → 构建 → 签名 → 滚动发布 `linux-nightly` |
+| `apps/desktop/scripts/sign-linux-artifacts.mjs` | 给 AppImage/deb/feed/SHA256SUMS 生成并校验 detached GPG 签名 |
+| `apps/desktop/linux-signing-key.asc` | Linux 包签名公钥（私钥在 Actions secret） |
 | `.gitignore` | 忽略 `apps/desktop/.env.linux` |
