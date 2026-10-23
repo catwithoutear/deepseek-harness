@@ -36,6 +36,30 @@ import {
 } from './macos-app-update-config.mjs'
 
 /**
+ * Generic update feed a Linux release build embeds. Local builds leave it unset, so they
+ * keep update checks disabled.
+ */
+const LINUX_UPDATE_FEED_ENV = 'DSH_DESKTOP_LINUX_FEED_URL'
+
+/**
+ * Resolve the generic update feed origin for a Linux build.
+ * @param {NodeJS.ProcessEnv} env - Packaging environment.
+ * @returns {string | undefined} HTTPS base URL without a trailing slash, or undefined when unset.
+ */
+function resolveLinuxUpdateFeedUrl(env) {
+  const configured = env[LINUX_UPDATE_FEED_ENV]?.trim()
+  if (configured === undefined || configured === '') return undefined
+  let url
+  try { url = new URL(configured) }
+  catch { throw new Error(`desktop package: ${LINUX_UPDATE_FEED_ENV} must be an absolute HTTPS URL`) }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== ''
+    || url.search !== '' || url.hash !== '') {
+    throw new Error(`desktop package: ${LINUX_UPDATE_FEED_ENV} must be an absolute HTTPS URL without credentials, query, or fragment`)
+  }
+  return url.href.replace(/\/+$/u, '')
+}
+
+/**
  * Create electron-builder configuration from one release environment.
  * @param {NodeJS.ProcessEnv} env - Packaging environment.
  * @param {NodeJS.Platform} hostPlatform - Build-host platform used when no explicit target is present.
@@ -97,6 +121,7 @@ export function createElectronBuilderConfig(
     installWindowsNsisBootstrapSigner({ sign: windowsSigner })
   }
   const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+  const linuxFeedUrl = resolvedPlatform === 'linux' ? resolveLinuxUpdateFeedUrl(env) : undefined
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   // electron-builder merges extraMetadata into the packaged manifest, so a build version here reaches
   // the artifact names, the update feed, and the installed app.getVersion() the updater compares against.
@@ -280,6 +305,11 @@ export function createElectronBuilderConfig(
       differentialPackage: true,
     },
     detectUpdateChannel: false,
-    publish: update === undefined ? null : [{ provider: 'generic', url: update.publicUrl, channel: update.channel }],
+    // Linux release builds publish to a rolling generic feed; local builds keep no updater source.
+    publish: update !== undefined
+      ? [{ provider: 'generic', url: update.publicUrl, channel: update.channel }]
+      : linuxFeedUrl === undefined
+        ? null
+        : [{ provider: 'generic', url: linuxFeedUrl, channel: 'nightly' }],
   }
 }
