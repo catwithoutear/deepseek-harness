@@ -82,6 +82,8 @@ AppImage 在部分发行版上需要 FUSE；没有 FUSE 时用 `--appimage-extra
 
 窗口行为：
 
+- 原生菜单栏默认隐藏（按 Alt 显示），避免在自定义界面之上多出一条系统菜单；
+  Edit 菜单使用应用语言（中文为“编辑”），不再出现中英混排
 - 关闭窗口会隐藏到系统托盘（面板需要支持 StatusNotifier / appindicator，Cinnamon、KDE、
   装了 AppIndicator 扩展的 GNOME 都可以）。
 - 托盘图标提供“打开 DeepSeek Harness / 退出 DeepSeek Harness”，单击图标重新显示窗口。
