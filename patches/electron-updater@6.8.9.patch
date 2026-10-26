@@ -1,0 +1,39 @@
+diff --git a/out/LinuxUpdater.js b/out/LinuxUpdater.js
+index f6da67b..7dfedeb 100644
+--- a/out/LinuxUpdater.js
++++ b/out/LinuxUpdater.js
+@@ -1,7 +1,20 @@
+ "use strict";
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.LinuxUpdater = void 0;
++const fs = require("fs");
+ const BaseUpdater_1 = require("./BaseUpdater");
++/**
++ * Electron's Linux sandbox sets PR_SET_NO_NEW_PRIVS on the browser process, which prevents
++ * setuid helpers such as pkexec from elevating. Read the flag before choosing the launcher.
++ */
++function hasNoNewPrivileges() {
++    try {
++        return /^NoNewPrivs:\s*1$/mu.test(fs.readFileSync("/proc/self/status", "utf8"));
++    }
++    catch {
++        return false;
++    }
++}
+ // Matches safe package manager names: alphanumeric, hyphens, underscores only.
+ // Rejects names with shell metacharacters that could cause command injection.
+ const SAFE_PM_REGEX = /^[a-zA-Z0-9_-]+$/;
+@@ -47,7 +60,12 @@ class LinuxUpdater extends BaseUpdater_1.BaseUpdater {
+         if (/pkexec/i.test(sudo[0]) || sudo[0] === "sudo") {
+             wrapper = "";
+         }
+-        return this.spawnSyncLog(sudo[0], [...(sudo.length > 1 ? sudo.slice(1) : []), `${wrapper}/bin/bash`, "-c", `'${commandWithArgs.join(" ")}'${wrapper}`]);
++        const privilegedArgs = [...(sudo.length > 1 ? sudo.slice(1) : []), `${wrapper}/bin/bash`, "-c", `'${commandWithArgs.join(" ")}'${wrapper}`];
++        if (process.platform === "linux" && hasNoNewPrivileges() && this.hasCommand("systemd-run")) {
++            this._logger.info("Running the privileged install through systemd-run --user to escape no_new_privs");
++            return this.spawnSyncLog("systemd-run", ["--user", "--wait", "--pipe", "--quiet", "--collect", "--", sudo[0], ...privilegedArgs]);
++        }
++        return this.spawnSyncLog(sudo[0], privilegedArgs);
+     }
+     sudoWithArgs(installComment) {
+         const sudo = this.determineSudoCommand();

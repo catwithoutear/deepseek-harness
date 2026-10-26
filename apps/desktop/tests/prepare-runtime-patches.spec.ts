@@ -4,11 +4,14 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import yaml from 'js-yaml'
 import { pnpmCommand } from '../../../scripts/release/process.ts'
 import { prepareRuntimePatches, verifyRuntimePatches } from '../scripts/prepare-runtime-patches.ts'
 import type { DesktopRuntimePatch } from '../scripts/runtime-patch-policy.ts'
+
+// Parsing the repository lockfile grows with the workspace and exceeds the default 5 s budget.
+vi.setConfig({ testTimeout: 30_000 })
 
 const roots: string[] = []
 const shared = { scope: 'shared', reason: 'Runtime fixture.' } as const
@@ -45,7 +48,7 @@ it('classifies the current workspace and shares only runtime patch bytes', () =>
   expect(plan.patches.map(entry => entry.spec)).toEqual([
     '@earendil-works/pi-ai@1.3.0', 'node-pty@1.2.0-beta.15', '@deepseek-ai/libreoffice-kit@0.1.5',
   ])
-  expect(plan.workspaceOnly).toHaveLength(10)
+  expect(plan.workspaceOnly).toHaveLength(11)
   expect(plan.workspaceOnly).toContain('@botiverse/oar')
   expect(plan.workspaceOnly).toContain('lexical')
   const settings = yaml.load(readFileSync(join(project, 'pnpm-workspace.yaml'), 'utf8')) as { overrides: Record<string, string> }
