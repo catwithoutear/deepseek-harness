@@ -118,6 +118,11 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
 - feed 同时列出 `.AppImage` 和 `.deb`，各自的 updater 读取自己那一项
 - deb 安装：electron-builder 写入 `resources/package-type=deb`，electron-updater 选 `DebUpdater`，
   下载后通过 `pkexec`/`sudo` 执行 `dpkg -i` 并重启
+  - 注意：Electron Linux sandbox 会让主进程带 `NoNewPrivs=1`，直接 spawn `pkexec` 会得到
+    `pkexec must be setuid root`（exit 127）。本 fork 给 electron-updater 打了补丁：检测到该标志时改走
+    `systemd-run --user --wait --pipe --collect`，由用户 systemd 实例重新起进程（`NoNewPrivs=0`）再执行
+    `pkexec`；没有 `systemd-run` 时回退原行为
+  - 因此 deb 自动安装需要 systemd 用户实例和一个图形 polkit agent（Cinnamon/KDE/GNOME 默认满足）
 - AppImage 安装：`AppImageUpdater` 依赖 `APPIMAGE` 环境变量原位置换文件；通过 AppImageLauncher
   启动时该变量通常也会被设置
 - 版本号：`<上游 productVersion>.<UTC 日期>.<run number>`，例如
@@ -204,6 +209,8 @@ rebase 冲突、构建失败、签名失败都会让 workflow 失败且**不发�
 | `apps/desktop/scripts/desktop-build-version-discovery.ts` | `--build-version auto` 的远端映射支持 Linux（本地构建不触发） |
 | `apps/desktop/src/main.ts`、`platform-view.ts` | Linux 的 Platform 内嵌页上报 `null`，不再伪装成 `darwin`；设置 Linux 窗口图标；Linux 托盘与“无托盘时关闭即退出” |
 | `apps/desktop/scripts/runtime-patch-policy.ts`、`patches/@deepseek-ai__libreoffice-kit@0.1.5.patch` | 只给 Desktop 运行时打补丁：asar 内的“包是否存在”探测会误报，导致 Linux 无法回退到 WASM Office 引擎 |
+| `pnpm-workspace.yaml`、`patches/electron-updater@6.8.9.patch` | 给桌面壳的 electron-updater 打工作区补丁：deb 安装时绕开 Electron 的 `no_new_privs`，否则 pkexec 必然 exit 127 |
+| `apps/desktop/tests/prepare-runtime-patches.spec.ts` | 随工作区补丁数量更新断言，并把解析根 lockfile 的用例超时放宽到 30 s |
 | `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`、`render:linux-icons`；补上 deb 需要的 `homepage`，以及无空格的 `desktopName`（WM_CLASS 与 .desktop 对齐） |
 | `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage 和 deb（不发布） |
 | `.github/workflows/linux-release.yml` | 每天追踪上游 → rebase → 构建 → 签名 → 滚动发布 `linux-nightly` |
