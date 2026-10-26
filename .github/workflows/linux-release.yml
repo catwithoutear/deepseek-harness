@@ -48,7 +48,22 @@ jobs:
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
           git fetch --no-tags upstream master
           if ! git merge-base --is-ancestor upstream/master HEAD; then
-            git rebase upstream/master
+            if ! git rebase upstream/master; then
+              {
+                echo "## Linux nightly: upstream rebase conflict"
+                echo ""
+                echo "Upstream \`$(git rev-parse --short upstream/master)\` conflicts with the Linux patch series."
+                echo ""
+                echo '```'
+                git status --short | grep -E '^(UU|AA|DD)' || true
+                echo '```'
+                echo ""
+                echo "Resolve with \`git fetch upstream master && git rebase upstream/master\` locally, push, then dispatch this workflow."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error title=Upstream rebase conflict::Conflicted files: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+              git rebase --abort || true
+              exit 1
+            fi
           fi
           if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/${LINUX_BRANCH})" ]; then
             git push --force-with-lease origin "HEAD:${LINUX_BRANCH}"
