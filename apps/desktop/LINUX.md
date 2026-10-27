@@ -129,6 +129,8 @@ sudo apt install ./deepseek-harness-*-linux-amd64-unsigned.deb
   `0.2.1-rc.2.20261023.42`，semver 上严格递增；`latest` 通道不接受 prerelease，所以固定用
   `nightly`
 - 本地构建不设置 `DSH_DESKTOP_LINUX_FEED_URL` 时不生成 `app-update.yml`，更新功能保持关闭
+- 安装前桌面壳会向 Host 查询运行中的任务；Host 偶发超过 10 秒未答复时会自动用更宽的时限重试一次，
+  仍失败才报 “task inspection timed out”
 - 首次必须手动安装一个带 feed 的发布版（本仓库 release 里的 deb/AppImage）；更早的手工构建
   没有 `app-update.yml`，其“检查更新”不会工作。之后的应用内更新才会生效
 
