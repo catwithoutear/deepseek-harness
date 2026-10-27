@@ -53,6 +53,34 @@ export interface DesktopQuitInspection {
 /** Quit inspection deadline; a slower Host counts as unknown work and the shell asks before quitting. */
 export const QUIT_INSPECTION_DEADLINE_MS = 2_000
 
+/** Update-handoff deadlines: one wide retry keeps a transient Host stall from aborting an install. */
+export const UPDATE_TASK_DEADLINES_MS = [10_000, 20_000] as const
+
+/** Deadline text the retry loop recognizes; other failures propagate on the first attempt. */
+export const UPDATE_TASK_TIMEOUT_MESSAGE = 'desktop update: task inspection timed out'
+
+/**
+ * Run one update-handoff control request, retrying only an unanswered deadline.
+ * @param run - Operation receiving the deadline for this attempt.
+ * @param deadlines - Attempt deadlines in order; the last attempt's failure is thrown.
+ * @returns The operation result from the first successful attempt.
+ */
+export async function retryUpdateTaskControl<T>(
+  run: (deadlineMs: number) => Promise<T>,
+  deadlines: readonly number[] = UPDATE_TASK_DEADLINES_MS,
+): Promise<T> {
+  let failure: unknown
+  for (const deadlineMs of deadlines) {
+    try {
+      return await run(deadlineMs)
+    } catch (error) {
+      failure = error
+      if (!(error instanceof Error) || error.message !== UPDATE_TASK_TIMEOUT_MESSAGE) throw error
+    }
+  }
+  throw failure
+}
+
 const MAX_HOST_DIAGNOSTIC_CHARS = 64 * 1024
 
 function isDesktopHostEvent(message: unknown): message is DesktopHostEvent {
@@ -253,9 +281,11 @@ export class DesktopHostProcess {
    * an unanswered drain fails at the control-request deadline without authorizing installation.
    */
   async updateTasks(action: 'inspect' | 'lock' | 'unlock'): Promise<boolean> {
-    const response = await this.control({ type: 'update-tasks', action }, 10_000, 'desktop update: task inspection timed out', 'desktop update')
-    if (response.type !== 'update-tasks') throw new Error('desktop update: Host answered with a different control response')
-    return response.active
+    return retryUpdateTaskControl(async (deadlineMs) => {
+      const response = await this.control({ type: 'update-tasks', action }, deadlineMs, UPDATE_TASK_TIMEOUT_MESSAGE, 'desktop update')
+      if (response.type !== 'update-tasks') throw new Error('desktop update: Host answered with a different control response')
+      return response.active
+    })
   }
 
   /**
