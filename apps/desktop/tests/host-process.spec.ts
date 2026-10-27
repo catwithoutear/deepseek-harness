@@ -3,7 +3,7 @@ import * as childProcess from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError, QUIT_INSPECTION_DEADLINE_MS } from '../src/host-process.ts'
+import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError, QUIT_INSPECTION_DEADLINE_MS, retryUpdateTaskControl, UPDATE_TASK_TIMEOUT_MESSAGE } from '../src/host-process.ts'
 import { OperationJournal } from '../src/operation-journal.ts'
 import { readOperationHistory } from '../src/operation-history.ts'
 import { renderCrashReport } from '../src/crash-report.ts'
@@ -87,6 +87,21 @@ process.on('message', message => {
 })
 process.send({ type: 'starting', runId: 'c254ab28-97c9-4382-95e6-2db9c66f98c8' })
 `
+
+it('retries one unanswered update-handoff deadline and propagates other failures immediately', async () => {
+  let attempts = 0
+  await expect(retryUpdateTaskControl(async () => {
+    attempts += 1
+    if (attempts === 1) throw new Error(UPDATE_TASK_TIMEOUT_MESSAGE)
+    return 7
+  }, [1, 1])).resolves.toBe(7)
+  expect(attempts).toBe(2)
+
+  await expect(retryUpdateTaskControl(async () => { throw new Error('desktop update: Host is unavailable') }, [1, 1]))
+    .rejects.toThrow('Host is unavailable')
+  await expect(retryUpdateTaskControl(async () => { throw new Error(UPDATE_TASK_TIMEOUT_MESSAGE) }, [1, 1]))
+    .rejects.toThrow(UPDATE_TASK_TIMEOUT_MESSAGE)
+})
 
 function projectWithHost(source = HTTP_HOST): string {
   const project = mkdtempSync(join(tmpdir(), 'dsh-desktop-host-test-'))
