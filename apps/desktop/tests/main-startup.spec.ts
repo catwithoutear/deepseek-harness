@@ -90,6 +90,7 @@ const harness = await vi.hoisted(async () => {
       isDestroyed: () => this.destroyed,
       setIgnoreMenuShortcuts: vi.fn(),
       focus: vi.fn(),
+      reload: vi.fn(),
       sendInputEvent: vi.fn(),
       send: vi.fn((channel: string, state: { policy?: { blocking: boolean } }) => {
         if (channel === 'dsh-desktop:mandatory-state' && state.policy?.blocking) policyBlocked.resolve()
@@ -2235,6 +2236,9 @@ describe('desktop main startup', () => {
     expect(() => { handler({ ...event, senderFrame: { url: 'https://other.example/' } }, 'untrusted') }).toThrow('unowned renderer')
     expect(() => { handler({ ...event, senderFrame: { ...frame } }, 'subframe') }).toThrow('non-primary frame')
     expect(() => { handler(event, {}) }).toThrow('must be text')
+    expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+    handler(event, 'client mount failed')
+    await vi.waitFor(() => { expect(window.webContents.reload).toHaveBeenCalledOnce() })
     expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
     handler(event, 'client mount failed')
     await harness.dialogShown.promise

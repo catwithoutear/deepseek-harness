@@ -406,6 +406,9 @@ async function main(): Promise<void> {
   let workspaceRecovery: Promise<void> | undefined
   let mainWindow: BrowserWindow | undefined
   let welcomeWindow: BrowserWindow | undefined
+  // A client bundle import can still be in flight when the boot audit runs right after an
+  // upgrade; the first failure gets one document reload before it becomes fatal.
+  let bootFailureRetried = false
   const installFileDrag = (): (() => Promise<void>) => installDesktopFileDrag(
     event => assertProductSender(event),
     (address, signal) => {
@@ -808,7 +811,19 @@ async function main(): Promise<void> {
       throw new Error('dsh desktop: rejected startup failure from a non-primary frame')
     }
     if (typeof message !== 'string') throw new Error('dsh desktop: startup failure must be text')
-    reportFatal(new Error(message), 'web-boot')
+    const failure = new Error(message)
+    // Transient bundle-import stalls (notably the first boot after a profile upgrade) leave client
+    // entries loading past the audit. Reloading the same document reruns the boot against the
+    // already-ready Host; only a repeated failure is fatal.
+    if (!bootFailureRetried) {
+      bootFailureRetried = true
+      console.warn('desktop web boot failed; retrying after reload', failure.message)
+      setImmediate(() => {
+        if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
+      })
+      return
+    }
+    reportFatal(failure, 'web-boot')
   })
 
   ipcMain.handle(DESKTOP_IPC.browserAcquire, (event, workspace: unknown) => {
