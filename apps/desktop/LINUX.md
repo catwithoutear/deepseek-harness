@@ -16,9 +16,9 @@ git fetch upstream master
 git rebase upstream/master          # 冲突通常只会出现在下面的补丁文件里
 ```
 
-Linux 支持集中在默认分支 `linux`（3 个独立提交），CI 每天自动把这三个提交 rebase 到
-`upstream/master` 并构建发布；本地也可按上面的命令手动同步。如果上游最终加入 Linux 目标，
-直接丢弃这三个提交即可，`master` 保持为上游镜像。
+Linux 支持集中在默认分支 `linux`（一组独立补丁提交），CI 每天自动把这些提交 rebase 到
+`upstream/master`，输入有变化时构建发布；本地也可按上面的命令手动同步。如果上游最终加入 Linux
+目标，直接丢弃这些提交即可，`master` 保持为上游镜像。
 
 同步后至少重跑一次本机构建（见下），确认上游的结构性改动没有让补丁失效。
 
@@ -169,13 +169,19 @@ sha256sum -c SHA256SUMS
 
 `.github/workflows/linux-release.yml`：
 
-1. **每天 02:00（Asia/Shanghai）** 或手动 dispatch（`force=true` 可强制重发）
-2. checkout `linux` 分支，fetch `upstream/master`；有新提交就把三个 Linux 提交 rebase 上去并
+1. **每天 02:00（Asia/Shanghai）** 跑一次判定，另有手动 dispatch（`force=true` 可强制重发）
+2. checkout `linux` 分支，fetch `upstream/master`；有新提交就把 Linux 补丁提交 rebase 上去并
    force-push 回 `linux`
-3. 对比滚动 release 里的 `upstream-version.txt`：上游 commit 没变且未 force 时直接跳过
+3. 计算构建指纹 `<upstream commit> <patch digest>`（patch digest 是
+   `git diff --binary upstream/master...HEAD` 的 sha1，即这一轮补丁的全部内容）：与滚动 release
+   里的 `build-fingerprint.txt` 相同且未 force 时直接跳过，不构建也不发布；补丁内容任何变化都会
+   触发重建，文档或 CI 改动同样算在内
 4. 在 `ubuntu-24.04` 上构建 AppImage + deb，注入 feed 与 build version
 5. 导入 GPG 私钥，签名全部产物
-6. 删除旧的 `linux-nightly` release 并重建，先传二进制与签名，再传 feed/校验和/版本标记
+6. 删除旧的 `linux-nightly` release 并重建，先传二进制与签名，再传 feed/校验和/构建指纹
+
+`gh` 会从 git 远程推断目标仓库，而 prepare job 里有 `upstream` 远程，所以 workflow 顶层设了
+`GH_REPO: ${{ github.repository }}`，让每个 `gh release` 调用都落在本仓库。
 
 rebase 冲突、构建失败、签名失败都会让 workflow 失败且**不发布**；此时需要人工在本地解决冲突后
 重新跑。
@@ -193,7 +199,8 @@ rebase 冲突、构建失败、签名失败都会让 workflow 失败且**不发�
 - 账号/Platform 内嵌页在 Linux 上按 `null` 平台上报（上游的 Platform 头只区分 macOS/Windows）。
 - 菜单、快捷键、zenity/kdialog 目录选择等 Linux 分支上游已有代码，但没有经过发布级 QA；
   遇到问题请优先在 fork 里修。托盘是本 fork 新加的，只验证了 Cinnamon 系面板。
-- 版本号与上游相同（例如 `0.2.1-rc.2`），靠产物名和清单里的 `dshBuildCommit` 区分。
+- 版本号是“上游 productVersion + UTC 日期 + run number”（见上），不是上游版本号本身；产物清单里的
+  `dshBuildCommit` 只用于溯源。
 
 ## 相对上游的改动
 
