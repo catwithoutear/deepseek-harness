@@ -1,13 +1,14 @@
 name: Linux nightly
 
-# Builds and publishes the Linux deb and AppImage whenever upstream or the Linux patch series
-# changes, plus on demand. The rolling release tag `linux-nightly` hosts the generic update feed
-# the desktop app reads.
+# Builds and publishes the Linux deb and AppImage whenever the published build is stale, plus on
+# demand. The rolling release tag `linux-nightly` hosts the generic update feed the desktop app
+# reads. This workflow never pushes to the repository: `linux` is rebased onto upstream by hand,
+# and until that happens the run reports the drift instead of publishing a build from a stale base.
 on:
   workflow_dispatch:
     inputs:
       force:
-        description: 'Rebuild even when upstream and the Linux patch series are unchanged'
+        description: 'Rebuild even when the Linux patch series and upstream are unchanged'
         type: boolean
         default: false
   schedule:
@@ -15,7 +16,7 @@ on:
     - cron: '0 18 * * *'
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
@@ -41,39 +42,47 @@ jobs:
       product_version: ${{ steps.plan.outputs.product_version }}
       upstream_commit: ${{ steps.plan.outputs.upstream_commit }}
       build_fingerprint: ${{ steps.plan.outputs.build_fingerprint }}
+      stale: ${{ steps.inspect.outputs.stale }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.LINUX_BRANCH }}
           fetch-depth: 0
-      - name: Rebase the Linux patches onto upstream
+      - name: Inspect the base against upstream
+        id: inspect
         run: |
           set -euo pipefail
-          git config user.name 'linux-nightly'
-          git config user.email 'catwithoutear@users.noreply.github.com'
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
           git fetch --no-tags upstream master
-          if ! git merge-base --is-ancestor upstream/master HEAD; then
-            if ! git rebase upstream/master; then
-              {
-                echo "## Linux nightly: upstream rebase conflict"
-                echo ""
-                echo "Upstream \`$(git rev-parse --short upstream/master)\` conflicts with the Linux patch series."
-                echo ""
-                echo '```'
-                git status --short | grep -E '^(UU|AA|DD)' || true
-                echo '```'
-                echo ""
-                echo "Resolve with \`git fetch upstream master && git rebase upstream/master\` locally, push, then dispatch this workflow."
-              } >> "$GITHUB_STEP_SUMMARY"
-              echo "::error title=Upstream rebase conflict::Conflicted files: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
-              git rebase --abort || true
-              exit 1
+          upstream_commit=$(git rev-parse upstream/master)
+          behind=$(git rev-list --count "HEAD..upstream/master")
+          ahead=$(git rev-list --count "upstream/master..HEAD")
+          # The build must come from a branch that already contains its base; this workflow never
+          # rebases, so a stale branch has to be reported rather than published from.
+          stale=false
+          if [ "$behind" -gt 0 ]; then stale=true; fi
+          {
+            echo "### Linux nightly base"
+            echo ""
+            echo "- branch \`${LINUX_BRANCH}\`: \`$(git rev-parse --short HEAD)\`"
+            echo "- upstream \`master\`: \`${upstream_commit:0:12}\`"
+            echo "- ahead of upstream: ${ahead} commits, behind: ${behind} commits"
+            if [ "$stale" = true ]; then
+              echo ""
+              echo "\`${LINUX_BRANCH}\` does not contain the current upstream base, so this run does not publish."
+              echo "Rebase it onto \`${upstream_commit:0:12}\` with \`git fetch upstream master && git rebase upstream/master\`,"
+              echo "push to \`${LINUX_BRANCH}\`, and check the rebase against upstream with:"
+              echo ""
+              echo '```'
+              echo 'git merge-tree --write-tree --name-only --no-messages upstream/master HEAD'
+              echo '```'
+              echo ""
+              echo "A clean merge means the rebase applies without conflicts."
             fi
-          fi
-          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/${LINUX_BRANCH})" ]; then
-            git push --force-with-lease origin "HEAD:${LINUX_BRANCH}"
-          fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "upstream_commit=$upstream_commit" >> "$GITHUB_OUTPUT"
+          echo "stale=$stale" >> "$GITHUB_OUTPUT"
+          echo "Branch behind upstream by ${behind} commits, ahead by ${ahead}, stale: ${stale}"
       - name: Decide whether the build is stale
         id: plan
         env:
@@ -111,7 +120,7 @@ jobs:
 
   package:
     needs: prepare
-    if: needs.prepare.outputs.needed == 'true'
+    if: needs.prepare.outputs.needed == 'true' && needs.prepare.outputs.stale != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
