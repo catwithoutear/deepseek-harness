@@ -15,8 +15,10 @@ on:
     # 02:00 Asia/Shanghai
     - cron: '0 18 * * *'
 
+# The workflow never changes repository contents: `contents: write` is the documented requirement
+# for publishing a release, nothing here pushes a commit or a tag.
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 concurrency:
