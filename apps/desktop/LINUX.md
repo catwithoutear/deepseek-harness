@@ -16,9 +16,9 @@ git fetch upstream master
 git rebase upstream/master          # 冲突通常只会出现在下面的补丁文件里
 ```
 
-Linux 支持集中在默认分支 `linux`（一组独立补丁提交），CI 每天自动把这些提交 rebase 到
-`upstream/master`，输入有变化时构建发布；本地也可按上面的命令手动同步。如果上游最终加入 Linux
-目标，直接丢弃这些提交即可，`master` 保持为上游镜像。
+Linux 支持集中在默认分支 `linux`（一组独立补丁提交），同步到上游是人工动作（见下面的发布流程）；
+CI 只在分支已对齐且内容有变化时构建发布。如果上游最终加入 Linux 目标，直接丢弃这些提交即可，
+`master` 保持为上游镜像。
 
 同步后至少重跑一次本机构建（见下），确认上游的结构性改动没有让补丁失效。
 
@@ -170,21 +170,27 @@ sha256sum -c SHA256SUMS
 `.github/workflows/linux-release.yml`：
 
 1. **每天 02:00（Asia/Shanghai）** 跑一次判定，另有手动 dispatch（`force=true` 可强制重发）
-2. checkout `linux` 分支，fetch `upstream/master`；有新提交就把 Linux 补丁提交 rebase 上去并
-   force-push 回 `linux`
+2. checkout `linux` 分支，fetch `upstream/master`，统计它与上游的领先/落后提交数，写进 run summary
 3. 计算构建指纹 `<upstream commit> <patch digest>`（patch digest 是
    `git diff --binary upstream/master...HEAD` 的 sha1，即这一轮补丁的全部内容）：与滚动 release
    里的 `build-fingerprint.txt` 相同且未 force 时直接跳过，不构建也不发布；补丁内容任何变化都会
    触发重建，文档或 CI 改动同样算在内
-4. 在 `ubuntu-24.04` 上构建 AppImage + deb，注入 feed 与 build version
-5. 导入 GPG 私钥，签名全部产物
-6. 删除旧的 `linux-nightly` release 并重建，先传二进制与签名，再传 feed/校验和/构建指纹
+4. `linux` 还没包含当前上游 base（落后）时同样不发布，只在 run summary 里报落后多少提交、该往哪个
+   提交上 rebase。构建必须来自已 rebase 的分支，不能用旧 base 出新包
+5. 在 `ubuntu-24.04` 上构建 AppImage + deb，注入 feed 与 build version
+6. 导入 GPG 私钥，签名全部产物
+7. 删除旧的 `linux-nightly` release 并重建，先传二进制与签名，再传 feed/校验和/构建指纹
+
+这个 workflow **从不向仓库推送**，权限只有 `contents: read`：把上游改动回推 `linux` 会改写
+`.github/workflows/` 下的文件，而 `GITHUB_TOKEN` 没有 `workflows` 权限，push 会被拒绝。因此
+`linux` 的 rebase 是人工动作——本地 `git fetch upstream master && git rebase upstream/master`
+后 `git push --force-with-lease`，推送前可用
+`git merge-tree --write-tree --name-only --no-messages upstream/master HEAD` 预演冲突。
 
 `gh` 会从 git 远程推断目标仓库，而 prepare job 里有 `upstream` 远程，所以 workflow 顶层设了
 `GH_REPO: ${{ github.repository }}`，让每个 `gh release` 调用都落在本仓库。
 
-rebase 冲突、构建失败、签名失败都会让 workflow 失败且**不发布**；此时需要人工在本地解决冲突后
-重新跑。
+该构建时构建失败、签名失败都会让 workflow 失败且**不发布**；基座落后不算失败，只是跳过发布。
 
 ## 已知限制
 
@@ -223,7 +229,7 @@ rebase 冲突、构建失败、签名失败都会让 workflow 失败且**不发�
 | `apps/desktop/tests/prepare-runtime-patches.spec.ts` | 随工作区补丁数量更新断言，并把解析根 lockfile 的用例超时放宽到 30 s |
 | `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`、`render:linux-icons`；补上 deb 需要的 `homepage`，以及无空格的 `desktopName`（WM_CLASS 与 .desktop 对齐） |
 | `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage 和 deb（不发布） |
-| `.github/workflows/linux-release.yml` | 每天追踪上游 → rebase → 构建 → 签名 → 滚动发布 `linux-nightly` |
+| `.github/workflows/linux-release.yml` | 每天检测上游与基座 → 已对齐且内容有变化时构建 → 签名 → 滚动发布 `linux-nightly`；只读，不回推 `linux` |
 | `apps/desktop/scripts/sign-linux-artifacts.mjs` | 给 AppImage/deb/feed/SHA256SUMS 生成并校验 detached GPG 签名 |
 | `apps/desktop/linux-signing-key.asc` | Linux 包签名公钥（私钥在 Actions secret） |
 | `.gitignore` | 忽略 `apps/desktop/.env.linux` |
