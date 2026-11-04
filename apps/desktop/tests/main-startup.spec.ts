@@ -1347,20 +1347,24 @@ describe('desktop main startup', () => {
       .map(call => call[0])
       .find(items => items.some(item => item.role === 'editMenu' || item.label === 'Edit'))
     if (template === undefined) throw new Error('application menu missing')
-    expect(template.map(describeItem)).toEqual(platform === 'darwin'
+    // Linux names its localized Edit menu, so it carries a label where other platforms use the role.
+    expect(template.map(item => describeItem(item))).toEqual(platform === 'darwin'
       ? ['Desktop test', en.fileMenu, 'editMenu', 'windowMenu']
       : ['Application', 'Edit'])
     const describeEdit = (items: MenuItemConstructorOptions[]): unknown[] => items.map(item => Array.isArray(item.submenu)
       ? [describeItem(item), describeEdit(item.submenu)]
-      : [describeItem(item), item.accelerator, item.visible, item.acceleratorWorksWhenHidden].filter(value => value !== undefined))
-    const edit = template.find(item => item.role === 'editMenu')!.submenu as MenuItemConstructorOptions[] | undefined
+      : [describeItem(item), item.label ?? item.accelerator, item.visible, item.acceleratorWorksWhenHidden]
+        .filter((value, index) => value !== undefined && !(index === 1 && value === describeItem(item))))
+    const editItem = template.find(item => item.role === 'editMenu') ?? template.find(item => item.label === en.edit)
+    const edit = editItem?.submenu as MenuItemConstructorOptions[] | undefined
     expect(edit === undefined ? undefined : describeEdit(edit)).toEqual(platform === 'darwin'
       ? [['undo'], ['redo'], ['separator'], ['cut'], ['copy'], ['paste'],
         ['pasteAndMatchStyle', 'Shift+Command+V'], ['pasteAndMatchStyle', 'Option+Shift+Command+V', false, true],
         ['delete'], ['selectAll'], ['separator'],
         [en.substitutionsMenu, [['showSubstitutions'], ['separator'], ['toggleSmartQuotes'], ['toggleSmartDashes'], ['toggleTextReplacement']]],
         [en.speechMenu, [['startSpeaking'], ['stopSpeaking']]]]
-      : undefined)
+      : [['undo', en.undo], ['redo', en.redo], ['separator'], ['cut', en.cut], ['copy', en.copy],
+        ['paste', en.paste], ['delete', en.delete], ['separator'], ['selectAll', en.selectAll]])
     const application = template[0]!.submenu as MenuItemConstructorOptions[]
     expect(application.filter(item => item.visible !== false).map(describeItem)).toEqual(platform === 'darwin'
       ? ['about', 'separator', en.checkUpdatesMenu, en.cliCommandMenu, 'separator', 'toggleDevTools', 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit']
