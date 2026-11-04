@@ -828,8 +828,16 @@ describe('desktop main startup', () => {
     harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](
       { sender, senderFrame: sender.mainFrame }, nextLocale,
     )
-    const refreshed = platform === 'win32' ? applicationMenuItems()
-      : harness.menu.mock.lastCall![0][0]!.submenu as MenuItemConstructorOptions[]
+    // The Linux tray rebuilds a clickable menu after the application template, so the last call
+    // alone no longer names it; the application template is the one whose entries own submenus.
+    const applicationTemplate = harness.menu.mock.calls
+      .map(call => call[0] as MenuItemConstructorOptions[])
+      .findLast(template => template[0]?.submenu !== undefined)!
+    const refreshed = platform === 'win32'
+      ? applicationMenuItems()
+      : platform === 'linux'
+        ? applicationTemplate[0]!.submenu as MenuItemConstructorOptions[]
+        : harness.menu.mock.lastCall![0][0]!.submenu as MenuItemConstructorOptions[]
     expect(refreshed.filter(item => item.role === 'toggleDevTools' && item.visible !== false)).toEqual([
       { role: 'toggleDevTools', label: nextLocale === 'en' ? en.toggleDevToolsMenu : zh.toggleDevToolsMenu },
     ])
