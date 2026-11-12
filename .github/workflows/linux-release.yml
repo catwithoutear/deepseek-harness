@@ -85,6 +85,12 @@ jobs:
           echo "upstream_commit=$upstream_commit" >> "$GITHUB_OUTPUT"
           echo "stale=$stale" >> "$GITHUB_OUTPUT"
           echo "Branch behind upstream by ${behind} commits, ahead by ${ahead}, stale: ${stale}"
+          # A stale run must not look healthy: this workflow exists to publish Linux builds, and a
+          # green run that silently publishes nothing hides the drift until someone notices.
+          if [ "$stale" = true ]; then
+            echo "::error title=Linux base is stale::${LINUX_BRANCH} is ${behind} commits behind upstream ${upstream_commit:0:12}; rebase it and push, then re-run"
+            exit 1
+          fi
       - name: Decide whether the build is stale
         id: plan
         env:
