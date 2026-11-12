@@ -1,24 +1,16 @@
 diff --git a/lib/index.js b/lib/index.js
-index 35d1be4d8398d87cdc4604fb17ddf80af93eec30..4da822d3c39d2029604791c432a9a5c5384e2e34 100644
+index 35d1be4d8398d87cdc4604fb17ddf80af93eec30..c984aacf17c3d958c222df1ee5579ce001e58617 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -1573,7 +1573,18 @@ const ENGINE_PREFIX = "@deepseek-ai/libreoffice-kit";
- * @returns true when at least one resolution directory holds the package.
+@@ -1635,7 +1635,10 @@ function resolvedManifest(packageFile, name) {
  */
- function installedPackageExists(name) {
--	return (require.resolve.paths(name) ?? []).some((directory) => lstatSync(join(directory, name), { throwIfNoEntry: false }) !== void 0);
-+	// Electron's asar-aware fs reports a nonexistent entry inside the archive as present, which
-+	// would turn the intended Linux WASM fallback into "installed package is incomplete".
-+	const separator = name.lastIndexOf("/");
-+	const parent = separator === -1 ? "" : name.slice(0, separator);
-+	const leaf = separator === -1 ? name : name.slice(separator + 1);
-+	return (require.resolve.paths(name) ?? []).some((directory) => {
-+		try {
-+			return readdirSync(join(directory, parent)).includes(leaf);
-+		} catch {
-+			return false;
-+		}
-+	});
- }
- /**
- * Return the optional package target for the current process ABI.
+ async function resolveEngine(resolvePackage = installedEnginePackage, packageExists = resolvePackage === installedEnginePackage ? installedPackageExists : () => false, { platform = process.platform, arch = process.arch, report = hostReport } = {}) {
+ 	const details = platform === "linux" ? report() : {};
+-	const target = platformTarget(platform, arch, () => details);
++	// The fork ships the WASM Office engine on Linux. No native Linux engine package is
++	// published, and Electron's asar-aware fs makes the "installed" probe unreliable, so skip
++	// the native candidate entirely instead of failing the conversion.
++	const target = platform === "linux" ? void 0 : platformTarget(platform, arch, () => details);
+ 	if (target !== void 0) {
+ 		const name = `${ENGINE_PREFIX}-${target}`;
+ 		let packageFile;
