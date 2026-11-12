@@ -21,9 +21,9 @@ export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatc
   'mdast-util-gfm-autolink-literal@2.0.1': { scope: 'workspace-only', reason: 'The patched Markdown parser is embedded in the client bundle.' },
   'micromark-extension-gfm-autolink-literal@2.1.0': { scope: 'workspace-only', reason: 'The patched Markdown parser is embedded in the client bundle.' },
   'node-pty@1.2.0-beta.15': { scope: 'shared', reason: 'Runtime terminals need helper resolution and Windows worker cleanup.' },
-  '@deepseek-ai/libreoffice-kit@0.1.5': {
+  '@deepseek-ai/libreoffice-kit@0.2.3': {
     scope: 'runtime-only',
-    path: 'patches/@deepseek-ai__libreoffice-kit@0.1.5.patch',
+    path: 'patches/@deepseek-ai__libreoffice-kit@0.2.3.patch',
     reason: 'The packaged Linux app must fall back to the WASM Office engine; asar-aware fs probes report missing engine packages as installed.',
   },
 }
