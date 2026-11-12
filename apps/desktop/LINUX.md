@@ -175,8 +175,9 @@ sha256sum -c SHA256SUMS
    `git diff --binary upstream/master...HEAD` 的 sha1，即这一轮补丁的全部内容）：与滚动 release
    里的 `build-fingerprint.txt` 相同且未 force 时直接跳过，不构建也不发布；补丁内容任何变化都会
    触发重建，文档或 CI 改动同样算在内
-4. `linux` 还没包含当前上游 base（落后）时同样不发布，只在 run summary 里报落后多少提交、该往哪个
-   提交上 rebase。构建必须来自已 rebase 的分支，不能用旧 base 出新包
+4. `linux` 还没包含当前上游 base（落后）时**直接让这次运行失败**，run summary 里写明落后多少提交、
+   该往哪个提交上 rebase。构建必须来自已 rebase 的分支，不能用旧 base 出新包；也不能让“没在发包”
+   看起来和“发过了”一样绿
 5. 在 `ubuntu-24.04` 上构建 AppImage + deb，注入 feed 与 build version
 6. 导入 GPG 私钥，签名全部产物
 7. 删除旧的 `linux-nightly` release 并重建，先传二进制与签名，再传 feed/校验和/构建指纹
@@ -190,7 +191,7 @@ sha256sum -c SHA256SUMS
 `gh` 会从 git 远程推断目标仓库，而 prepare job 里有 `upstream` 远程，所以 workflow 顶层设了
 `GH_REPO: ${{ github.repository }}`，让每个 `gh release` 调用都落在本仓库。
 
-该构建时构建失败、签名失败都会让 workflow 失败且**不发布**；基座落后不算失败，只是跳过发布。
+该构建时构建失败、签名失败、基座落后都会让 workflow 失败且**不发布**：只有“已对齐且无需重建”才是绿色。
 
 ## 已知限制
 
