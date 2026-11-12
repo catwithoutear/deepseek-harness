@@ -24,7 +24,7 @@ export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatc
   '@deepseek-ai/libreoffice-kit@0.2.3': {
     scope: 'runtime-only',
     path: 'patches/@deepseek-ai__libreoffice-kit@0.2.3.patch',
-    reason: 'The packaged Linux app must fall back to the WASM Office engine; asar-aware fs probes report missing engine packages as installed.',
+    reason: 'The packaged Linux app must use the WASM Office engine: no native Linux engine package is published, so skip the native candidate instead of failing conversion.',
   },
 }
 

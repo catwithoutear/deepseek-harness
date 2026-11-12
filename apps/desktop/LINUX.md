@@ -224,7 +224,7 @@ sha256sum -c SHA256SUMS
 | `apps/desktop/scripts/desktop-toolchain-preflight.ts` | 平台参数接受 `linux` |
 | `apps/desktop/scripts/desktop-build-version-discovery.ts` | `--build-version auto` 的远端映射支持 Linux（本地构建不触发） |
 | `apps/desktop/src/main.ts`、`platform-view.ts` | Linux 的 Platform 内嵌页上报 `null`，不再伪装成 `darwin`；设置 Linux 窗口图标；Linux 托盘与“无托盘时关闭即退出” |
-| `apps/desktop/scripts/runtime-patch-policy.ts`、`patches/@deepseek-ai__libreoffice-kit@0.2.3.patch` | 只给 Desktop 运行时打补丁：asar 内的“包是否存在”探测会误报，导致 Linux 无法回退到 WASM Office 引擎 |
+| `apps/desktop/scripts/runtime-patch-policy.ts`、`patches/@deepseek-ai__libreoffice-kit@0.2.3.patch` | 只给 Desktop 运行时打补丁：kit 0.2.3 会先尝试原生 Linux 引擎，但该包未发布，补丁让 Linux 直接用 WASM Office 引擎 |
 | `pnpm-workspace.yaml`、`patches/electron-updater@6.8.9.patch` | 给桌面壳的 electron-updater 打工作区补丁：deb 安装时绕开 Electron 的 `no_new_privs`，否则 pkexec 必然 exit 127 |
 | `apps/desktop/tests/prepare-runtime-patches.spec.ts` | 随工作区补丁数量更新断言，并把解析根 lockfile 的用例超时放宽到 30 s |
 | `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`、`render:linux-icons`；补上 deb 需要的 `homepage`，以及无空格的 `desktopName`（WM_CLASS 与 .desktop 对齐） |
