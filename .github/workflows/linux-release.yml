@@ -16,7 +16,7 @@ on:
     - cron: '0 18 * * *'
 
 # The workflow never changes repository contents: `contents: write` is the documented requirement
-# for publishing a release, nothing here pushes a commit or a tag.
+# for publishing releases and their version tags; no branch commits are pushed.
 permissions:
   contents: write
   actions: read
@@ -44,6 +44,7 @@ jobs:
       product_version: ${{ steps.plan.outputs.product_version }}
       upstream_commit: ${{ steps.plan.outputs.upstream_commit }}
       build_fingerprint: ${{ steps.plan.outputs.build_fingerprint }}
+      build_commit: ${{ steps.plan.outputs.build_commit }}
       stale: ${{ steps.inspect.outputs.stale }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -122,6 +123,7 @@ jobs:
           echo "product_version=$product_version" >> "$GITHUB_OUTPUT"
           echo "upstream_commit=$upstream_commit" >> "$GITHUB_OUTPUT"
           echo "build_fingerprint=$build_fingerprint" >> "$GITHUB_OUTPUT"
+          echo "build_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Previous build fingerprint: ${previous:-<none>}"
           echo "Current build fingerprint: ${build_fingerprint}"
           echo "Upstream ${upstream_commit:0:12}, product ${product_version}, need build: ${needed}"
@@ -134,7 +136,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ env.LINUX_BRANCH }}
+          ref: ${{ needs.prepare.outputs.build_commit }}
+          persist-credentials: false
       - uses: pnpm/action-setup@v5.0.0
         with:
           version: 11.28.5
@@ -162,9 +165,10 @@ jobs:
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
           printf '%s' "$LINUX_GPG_PRIVATE_KEY" | gpg --batch --import
           pnpm --dir apps/desktop exec tsx scripts/sign-linux-artifacts.mjs
-      - name: Publish rolling release
+      - name: Archive build and publish rolling release
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_COMMIT: ${{ needs.prepare.outputs.build_commit }}
           BUILD_VERSION: ${{ needs.prepare.outputs.build_version }}
           BUILD_FINGERPRINT: ${{ needs.prepare.outputs.build_fingerprint }}
           PRODUCT_VERSION: ${{ needs.prepare.outputs.product_version }}
@@ -178,6 +182,7 @@ jobs:
           Rolling Linux build of DeepSeek Harness.
 
           - build version: \`$BUILD_VERSION\`
+          - build commit: \`$BUILD_COMMIT\`
           - upstream product version: \`$PRODUCT_VERSION\`
           - upstream commit: \`$UPSTREAM_COMMIT\`
           - build fingerprint: \`$BUILD_FINGERPRINT\`
@@ -189,14 +194,4 @@ jobs:
           EOF
           cp apps/desktop/linux-signing-key.asc "$artifacts/"
           printf '%s\n' "$BUILD_FINGERPRINT" > "$artifacts/build-fingerprint.txt"
-          gh release delete "$RELEASE_TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$RELEASE_TAG" --prerelease --title "Linux nightly · $BUILD_VERSION" --notes-file "$notes"
-          # Binaries and their signatures first, so the feed never points at missing files.
-          gh release upload "$RELEASE_TAG" \
-            "$artifacts"/*.AppImage "$artifacts"/*.deb \
-            "$artifacts"/*.AppImage.asc "$artifacts"/*.deb.asc \
-            "$artifacts/linux-signing-key.asc"
-          gh release upload "$RELEASE_TAG" \
-            "$artifacts/nightly-linux.yml" "$artifacts/nightly-linux.yml.asc" \
-            "$artifacts/SHA256SUMS" "$artifacts/SHA256SUMS.asc" \
-            "$artifacts/build-fingerprint.txt"
+          RELEASE_NOTES="$notes" node apps/desktop/scripts/publish-linux-release.mjs "$artifacts"

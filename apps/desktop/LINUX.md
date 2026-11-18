@@ -178,11 +178,23 @@ sha256sum -c SHA256SUMS
 4. `linux` 还没包含当前上游 base（落后）时**直接让这次运行失败**，run summary 里写明落后多少提交、
    该往哪个提交上 rebase。构建必须来自已 rebase 的分支，不能用旧 base 出新包；也不能让“没在发包”
    看起来和“发过了”一样绿
-5. 在 `ubuntu-24.04` 上构建 AppImage + deb，注入 feed 与 build version
+5. `package` job 固定 checkout `prepare` 记录的精确 `build_commit`，在 `ubuntu-24.04` 上构建 AppImage + deb，注入 feed 与 build version（发布脚本依赖仓库 devDependencies 中的 `js-yaml`，需使用完整 `pnpm install --frozen-lockfile`，不能在 `--prod` 下运行）
 6. 导入 GPG 私钥，签名全部产物
-7. 删除旧的 `linux-nightly` release 并重建，先传二进制与签名，再传 feed/校验和/构建指纹
+7. 先创建绑定实际构建 commit 的 `linux-v<buildVersion>` 草稿，上传安装包、签名、公钥、feed、校验和与构建指纹；逐个比对 GitHub 资产的 SHA-256 和大小后更新标题、notes 并发布归档。
+   - 正常发布若检测到仓库里已有更大 run number 的已发布归档，会在创建新归档前直接拒绝。
+   - 已发布的版本归档不覆盖；失败草稿只能在源 SHA 与已有资产均匹配时补传。
+   - 传入 `--archive-only` 时可为历史产物补建或核验版本归档，不检查新版本排序，也不改动 `linux-nightly` 与保留计数。
+8. 更新现有 `linux-nightly` 滚动 release：
+   - 先补传缺失的带版本二进制与 `.asc` 签名并核验摘要，不删除旧文件；再以 `staged-<buildVersion>-<文件名>` 上传全部小型元数据并核验，不使用先删后传的 `--clobber`。
+   - 切换文件名时通过资产 ID 将旧资产改名为 `previous-<buildVersion>-<文件名>` 作为远端备份，再把 `staged-*` 改名为固定文件名。GitHub 不提供多资产原子切换，切换窗口内可能短暂缺少固定文件名。
+   - 切换或核验失败会按资产 ID 逆序恢复旧资产名与原 release 标题/说明；若恢复也失败，则抛出 `AggregateError` 并保留远端 `previous-*` 备份供人工恢复。
+   - 滚动 tag 仅为通道别名，不移动它；源码追溯以版本归档 tag 和 release notes 中的 `build commit` 为准。
+9. 通道切换并核验成功后，执行清理与标记提交：
+   - 按 workflow 运行序号保留最近 **6 个**已发布的 `linux-v<buildVersion>` 归档（包含本次发布）；删除更老归档及对应 tag。草稿、`linux-nightly` 与上游 tag 不在清理范围；清理部分失败可能删除部分超额归档，但不影响最近 6 个版本。
+   - `build-fingerprint.txt` 在切换与保留策略成功后最后提交，避免失败后被下次判定误跳过。
+   - 随后清理 `linux-nightly` 上不再需要的旧二进制与 `previous-*` 备份；此步骤失败只告警，留下的多余资产可在下次成功发布时清理。
 
-这个 workflow **从不推送提交或 tag**，`contents: write` 只用于发布 `linux-nightly` release：
+这个 workflow **从不回推分支提交**，`contents: write` 用于发布滚动 release、版本归档及对应 tag：
 把上游改动回推 `linux` 会改写 `.github/workflows/` 下的文件，而 `GITHUB_TOKEN` 没有
 `workflows` 权限，push 会被拒绝。因此 `linux` 的 rebase 是人工动作——本地
 `git fetch upstream master && git rebase upstream/master` 后 `git push --force-with-lease`，
@@ -193,6 +205,12 @@ sha256sum -c SHA256SUMS
 
 该构建时构建失败、签名失败、基座落后都会让 workflow 失败且**不发布**：只有“已对齐且无需重建”才是绿色。
 
+## 回滚到历史构建
+
+从 GitHub Releases 中选择仍在保留范围内的 `linux-v<buildVersion>`，下载该版 `.deb` 或 `.AppImage`、对应 `.asc`、公钥与 `SHA256SUMS`，按上面的签名与校验和步骤验证后安装。deb 可在完全退出应用后用 `sudo dpkg -i ./<旧版本>.deb` 手动降级；AppImage 可直接启动保留的旧文件。归档中的 feed 用于记录该版资产，不是独立更新通道；安装包内的更新源仍指向 `linux-nightly`，检查更新仍会提示最新版本。
+
+保留安装包不等于能够回退会话或配置的数据格式。升级前应备份 DSH HOME（通常为 `~/.dsh`）及桌面端用户数据；如果新版已经迁移数据，回滚时使用兼容的备份，不能假设旧版可以读取。历史保留从启用归档时开始，之前被滚动发布删除的资产不能靠 tag 自动恢复。
+
 ## 已知限制
 
 - 未做 Apple/Windows 那类平台代码签名（产物名仍带 `-unsigned`），但发布产物有 GPG 签名；
@@ -201,7 +219,7 @@ sha256sum -c SHA256SUMS
   不会去拉取上游的强制更新配置
 - 应用内更新不校验 GPG（只校验 sha512）；AppImage 更新要求以 AppImage 方式启动；
   deb 更新需要 `pkexec`/`sudo` 授权对话框
-- 更新是“滚动 nightly”：旧版本资产会被覆盖，不做多版本并存
+- 自动更新跟随滚动 `linux-nightly`；最近 6 个构建另存为版本归档供手动回滚，不提供应用内一键降级
 - 只验证 x64；`linux-arm64` 没有加入构建目标。
 - 账号/Platform 内嵌页在 Linux 上按 `null` 平台上报（上游的 Platform 头只区分 macOS/Windows）。
 - 菜单、快捷键、zenity/kdialog 目录选择等 Linux 分支上游已有代码，但没有经过发布级 QA；
@@ -230,7 +248,8 @@ sha256sum -c SHA256SUMS
 | `apps/desktop/tests/prepare-runtime-patches.spec.ts` | 随工作区补丁数量更新断言，并把解析根 lockfile 的用例超时放宽到 30 s |
 | `apps/desktop/package.json` | 增加 `package:linux:x64` / `:unsigned` / `:dir`、`render:linux-icons`；补上 deb 需要的 `homepage`，以及无空格的 `desktopName`（WM_CLASS 与 .desktop 对齐） |
 | `.github/workflows/linux-package.yml` | 手动触发，在 `ubuntu-24.04` 上产出 unsigned AppImage 和 deb（不发布） |
-| `.github/workflows/linux-release.yml` | 每天检测上游与基座 → 已对齐且内容有变化时构建 → 签名 → 滚动发布 `linux-nightly`；不回推 `linux` |
+| `.github/workflows/linux-release.yml` | 每天检测上游与基座 → 固定构建 SHA 打包 → 签名 → 双轨发布；版本归档保留最近 6 个，不回推 `linux` |
 | `apps/desktop/scripts/sign-linux-artifacts.mjs` | 给 AppImage/deb/feed/SHA256SUMS 生成并校验 detached GPG 签名 |
+| `apps/desktop/scripts/publish-linux-release.mjs` | 先验证版本归档，再切换滚动通道，最后保留最近 6 个版本；`--archive-only` 可为现有产物补归档，不切换通道也不执行清理 |
 | `apps/desktop/linux-signing-key.asc` | Linux 包签名公钥（私钥在 Actions secret） |
 | `.gitignore` | 忽略 `apps/desktop/.env.linux` |
